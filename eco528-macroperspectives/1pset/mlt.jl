@@ -6,7 +6,7 @@
 
 cd(dirname(@__FILE__))
 
-using UnPack, LinearAlgebra, StatsBase
+using UnPack, LinearAlgebra, StatsBase, Plots
 include("tauchen.jl")
 
 u(c) = log(c)
@@ -23,7 +23,7 @@ mutable struct Params
     N::Integer
     MC::MarkovChain
  
-    function Params(MC::MarkovChain; β = 0.9, r = 0.02, q̅ = 1 / 1.02, γ = 0, N = 100)
+    function Params(MC::MarkovChain; β = 0.9, r = 0.02, q̅ = 1 / 1.02, γ = 0, N = 150)
 	ygrid = exp.(MC.state_values)
 	amin = -ygrid[end]
 	amax = ygrid[end]
@@ -41,7 +41,6 @@ mutable struct ValueAndPolicy
 	value_default::Array{Float64,2} # Value function when in autarky (default)
 	q::Array{Float64,2} # Prices (inverse return to savings)
 	savings_pol::Array{Int64,2} # savings policy function
-	c_pol::Array{Float64,2} # consumption policy function
 	D_pol::Array{Int8, 2} # default decision
 
 	function ValueAndPolicy(P::Params)
@@ -61,10 +60,9 @@ mutable struct ValueAndPolicy
 		end
 
 		q = q̅ * ones(Float64, N, states)
-		c_pol = Array{Float64,2}(undef, (N, states)) #cij = c(a[i], y[j])
 		savings_pol = round.(Int, ones((N, states))) # savings policy fuction (in indices)
 		D_pol = zeros(Int8, N, states)
-		return new(V, value_market, value_default, q, savings_pol, c_pol, D_pol)
+		return new(V, value_market, value_default, q, savings_pol, D_pol)
 	end
 end
 
@@ -77,8 +75,8 @@ function OneStepUpdate!(VP, EV, Evalue_market, Evalue_default)
 
 		for i in 1:N
 			for k in 1:N
-				consumption = max(y[j] + a[VP.savings_pol[i, j]] - VP.q[k, j] * a[k], 1e-5) # for each choice of savings, consumption is residual; can't be negative
-				objective[k] = u(consumption) + β * Evalue_market[k, j]
+				consumption = max(y[j] + a[i] - VP.q[k, j] * a[k], 1e-5) # for each choice of savings, consumption is residual; can't be negative
+				objective[k] = u(consumption) + β * EV[k, j]
 			end
 
 			VP.savings_pol[i,j] = round.(Int,argmax(objective)) 
@@ -185,3 +183,18 @@ MC5 = Tauchen(ρ, σ, 5; m = 2)
 P = Params(MC)
 VP = ValueAndPolicy(P)
 ValueFunctionIteration!(P, VP)
+
+
+theme(:dark)
+plot(P.a, VP.V, title = "Value Function", legend = :best, lw = 1.5)
+png("valuefunction")
+plot(P.a, VP.value_market, title = "Value Function when Participating in the Market", legend = :best, lw = 1.5)
+png("marketvaluefunction")
+
+display(VP.value_default)
+
+
+
+
+
+
