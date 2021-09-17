@@ -26,7 +26,7 @@ function Tauchen(ρ::T, σ::T, number_states::Integer; m::Integer = 2) where{T<:
 			if k == 1
 				transition[j, k] = cdf(Normal(0, σ), y[1] + 0.5 * d - ρ * y[j])
 			elseif k == number_states
-				transition[j,k] = 1 - cdf(Normal(0, σ), y[1] - 0.5 * d - ρ * y[j])
+				transition[j, k] = 1 - cdf(Normal(0, σ), y[number_states] - 0.5 * d - ρ * y[j])
 			else
 				transition[j, k] = cdf(Normal(0, σ), y[k] + 0.5 * d - ρ * y[j]) - cdf(Normal(0, σ), y[k] - 0.5 * d - ρ * y[j])
 			end
@@ -57,3 +57,21 @@ function SimulateMC(MC::MarkovChain; T::Integer = 10000)
 
 	return(history)
 end
+
+
+function SimulateProcess(ρ, σ; T = 1000)
+	wbar = -(σ^2) / (2 * (1 + ρ))
+
+	draws = rand(Normal(0, σ), T)
+	history = Array{Float64}(undef, T)
+	history[1] = wbar
+
+	for t in 2:T
+		history[t] = wbar + ρ * history[t-1] + draws[t]
+	end
+
+	path = history
+	return(path)
+end
+
+
