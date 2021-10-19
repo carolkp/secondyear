@@ -58,7 +58,7 @@ mutable struct ValueAndPolicy
 		for t in 1:NT # initial guess is consuming whole income + return on savings
 			for i in 1:Na
 				c =  r * a[i] .+ x_t[t] .* MC.state_values[:]
-				consumption_pol[t, i, :] = c
+				consumption_pol[NT, i, :] = c
 				V[t, i, :] = utility.(c; γ)
 			end
 		end
@@ -85,7 +85,7 @@ function OnePeriodUpdate!(t, da, dt, IncomeTransition, NaJ, VP::ValueAndPolicy, 
 	# from here on depend on t
 	# have V in last period (same as initial guess)
 	# will to iteration to find second to last period
-	t = NT-1
+	#t = NT-1
 	x_t = x(timegrid[t])
 	δ_t = δ(timegrid[t])
 	nextperiodV = reshape(copy(VP.V[t+1, :, :]), (NaJ,1))
@@ -107,17 +107,15 @@ function OnePeriodUpdate!(t, da, dt, IncomeTransition, NaJ, VP::ValueAndPolicy, 
 	while iter < maxiter && ε > tolerance
 
 		# Need forward and backward difference approx of V'
-		V_forward[1:(Na - 1), :] = 0, (oldV[2:Na, :] .- oldV[1:(Na - 1), :]) ./ da
+		V_forward[1:(Na - 1), :] = (oldV[2:Na, :] .- oldV[1:(Na - 1), :]) ./ da
 		V_backward[2:Na, :] = (oldV[2:Na, :] .- oldV[1:(Na-1), :]) ./ da
 		# Treat savings as 0 in the boundaries
 		V_forward[Na, :] = Diff_utility.(r * a[Na] .+ x_t .* MC.state_values; γ)
 		V_backward[1, :] = Diff_utility.(r * a[1] .+ x_t .* MC.state_values; γ)
 		# Now calculate corresponding forward and backward consumption and savings
 		# From FOC, c = inverse of u' evaluated at V'
-		println("here1")	
 		c_forward = Diff_utility_inverse.(V_forward; γ)
 		c_backward = Diff_utility_inverse.(V_backward; γ)
-		println("here2")	
 	
 		for i in 1:Na
 			c_central[i, :] = @. x_t * MC.state_values + r * a[i]
@@ -138,7 +136,7 @@ function OnePeriodUpdate!(t, da, dt, IncomeTransition, NaJ, VP::ValueAndPolicy, 
 		lowerdiag = reshape(lowerdiag[2:NaJ], (NaJ - 1,))
 	
 		upperdiag = [@. max(s_forward[1:Na-1, :], 0) / da ; zeros(1, MC.states)]
-		upperdiag = reshape(lowerdiag[1:NaJ - 1], (NaJ - 1,))
+		upperdiag = reshape(upperdiag[1:NaJ - 1], (NaJ - 1,))
 	
 		diag = @. (min(s_backward, 0) -  max(s_forward, 0)) / da
 		diag = reshape(diag, (NaJ,))
@@ -160,6 +158,7 @@ function OnePeriodUpdate!(t, da, dt, IncomeTransition, NaJ, VP::ValueAndPolicy, 
 	if iter == maxiter && ε > tolerance
 		println("Failed to converge :(")
 	else
+		VP.V[t, :, :] = oldV
 		println("Converged for period $t !")
 	end
 end
@@ -173,7 +172,7 @@ function BackwardInduction!(VP::ValueAndPolicy, M::Model)
 	NaJ = MC.states * Na
 	
 	for t in (NT-1):-1:1
-		println(t)
+		println("\nPeriod $t out of $NT")
 		OnePeriodUpdate!(t, da, dt, IncomeTransition, NaJ, VP, M)
 	end
 end
