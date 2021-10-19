@@ -79,6 +79,55 @@ function Diff_utility_inverse(u; γ = 2)
 	return(u^(-1/γ))
 end
 
+function GetA(oldV, da, NaJ, x_t, M::Model)
+	@unpack r, ρ, γ, T, Na, NT, a, timegrid, MC = M
+
+	V_forward = similar(oldV)
+	V_backward = similar(oldV)
+	c_central = similar(oldV)
+	s_central = zeros(size(c_central))
+	s_forward = similar(c_central)
+	s_backward = similar(c_central)
+	
+	# Need forward and backward difference approx of V'
+	V_forward[1:(Na - 1), :] = (oldV[2:Na, :] .- oldV[1:(Na - 1), :]) ./ da
+	V_backward[2:Na, :] = (oldV[2:Na, :] .- oldV[1:(Na-1), :]) ./ da
+	# Treat savings as 0 in the boundaries
+	V_forward[Na, :] = Diff_utility.(r * a[Na] .+ x_t .* MC.state_values; γ)
+	V_backward[1, :] = Diff_utility.(r * a[1] .+ x_t .* MC.state_values; γ)
+	# Now calculate corresponding forward and backward consumption and savings
+	# From FOC, c = inverse of u' evaluated at V'
+	c_forward = Diff_utility_inverse.(V_forward; γ)
+	c_backward = Diff_utility_inverse.(V_backward; γ)
+	
+	for i in 1:Na
+		c_central[i, :] = @. x_t * MC.state_values + r * a[i]
+		s_forward[i, :] = @. x_t * MC.state_values + r * a[i] - c_forward[i, :]
+		s_backward[i, :] = @. x_t * MC.state_values + r * a[i] - c_backward[i, :]
+	end
+	V_central = Diff_utility.(c_central; γ)
+	
+	Ind_forward = s_forward .> 0
+	Ind_backward = s_backward .< 0
+	Ind_central = @. (1 - Ind_forward - Ind_backward)
+	Vprime = Ind_forward .* V_forward + Ind_backward .* V_backward + Ind_central .* V_central
+	#current_consumption =  Ind_forward .* c_forward + Ind_backward .* c_backward + Ind_central .* c_central
+	current_consumption = Diff_utility_inverse.(Vprime)
+	current_utility = reshape(utility.(current_consumption; γ), (NaJ,1))
+
+	lowerdiag = [zeros(1, MC.states) ; @. - min(s_backward[2:Na, :], 0) / da]
+	lowerdiag = reshape(lowerdiag[2:NaJ], (NaJ - 1,))
+	
+	upperdiag = [@. max(s_forward[1:Na-1, :], 0) / da ; zeros(1, MC.states)]
+	upperdiag = reshape(upperdiag[1:NaJ - 1], (NaJ - 1,))
+	
+	diag = @. (min(s_backward, 0) -  max(s_forward, 0)) / da
+	diag = reshape(diag, (NaJ,))
+	A = spdiagm(-1 => lowerdiag, 0 => diag, 1 => upperdiag)
+	
+	return(A, current_utility)
+end
+
 function OnePeriodUpdate!(t, da, dt, IncomeTransition, NaJ, VP::ValueAndPolicy, M::Model)
 	@unpack r, ρ, γ, T, Na, NT, a, timegrid, MC = M
 	
@@ -97,50 +146,10 @@ function OnePeriodUpdate!(t, da, dt, IncomeTransition, NaJ, VP::ValueAndPolicy, 
 	iter = 0
 	ε = 1.0
 	# VFI
-	V_forward = similar(oldV)
-	V_backward = similar(oldV)
-	c_central = similar(oldV)
-	s_central = zeros(size(c_central))
-	s_forward = similar(c_central)
-	s_backward = similar(c_central)
-	
+
 	while iter < maxiter && ε > tolerance
-
-		# Need forward and backward difference approx of V'
-		V_forward[1:(Na - 1), :] = (oldV[2:Na, :] .- oldV[1:(Na - 1), :]) ./ da
-		V_backward[2:Na, :] = (oldV[2:Na, :] .- oldV[1:(Na-1), :]) ./ da
-		# Treat savings as 0 in the boundaries
-		V_forward[Na, :] = Diff_utility.(r * a[Na] .+ x_t .* MC.state_values; γ)
-		V_backward[1, :] = Diff_utility.(r * a[1] .+ x_t .* MC.state_values; γ)
-		# Now calculate corresponding forward and backward consumption and savings
-		# From FOC, c = inverse of u' evaluated at V'
-		c_forward = Diff_utility_inverse.(V_forward; γ)
-		c_backward = Diff_utility_inverse.(V_backward; γ)
-	
-		for i in 1:Na
-			c_central[i, :] = @. x_t * MC.state_values + r * a[i]
-			s_forward[i, :] = @. x_t * MC.state_values + r * a[i] - c_forward[i, :]
-			s_backward[i, :] = @. x_t * MC.state_values + r * a[i] - c_backward[i, :]
-		end
-		V_central = Diff_utility.(c_central; γ)
 		
-		Ind_forward = s_forward .> 0
-		Ind_backward = s_backward .< 0
-		Ind_central = @. (1 - Ind_forward - Ind_backward)
-		Vprime = Ind_forward .* V_forward + Ind_backward .* V_backward + Ind_central .* V_central
-		#current_consumption =  Ind_forward .* c_forward + Ind_backward .* c_backward + Ind_central .* c_central
-		current_consumption = Diff_utility_inverse.(Vprime)
-		current_utility = reshape(utility.(current_consumption; γ), (NaJ,1))
-
-		lowerdiag = [zeros(1, MC.states) ; @. - min(s_backward[2:Na, :], 0) / da]
-		lowerdiag = reshape(lowerdiag[2:NaJ], (NaJ - 1,))
-	
-		upperdiag = [@. max(s_forward[1:Na-1, :], 0) / da ; zeros(1, MC.states)]
-		upperdiag = reshape(upperdiag[1:NaJ - 1], (NaJ - 1,))
-	
-		diag = @. (min(s_backward, 0) -  max(s_forward, 0)) / da
-		diag = reshape(diag, (NaJ,))
-		A = spdiagm(-1 => lowerdiag, 0 => diag, 1 => upperdiag)
+		A, current_utility = GetA(oldV, da, NaJ, x_t, M)
 		TransitionMatrix = A + IncomeTransition
 
 		b = current_utility .+ (1 / dt) .* nextperiodV
@@ -188,4 +197,3 @@ MC = MarkovChain()
 M = Model(MC; ρ = ρ, r = r, γ = γ)
 VP = ValueAndPolicy(M)
 BackwardInduction!(VP, M)
-#OnePeriodUpdate!(t, da, dt, IncomeTransitionVP, M)
